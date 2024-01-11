@@ -1,22 +1,31 @@
+package com.example.emojicon.presentation
+
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.tooling.preview.Devices
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.wear.compose.material.Button
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 import kotlin.math.cos
@@ -26,14 +35,20 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            WearApp()
+            val navController = rememberNavController()
+            NavHost(navController = navController, startDestination = "wearApp") {
+                composable("wearApp") { WearApp(navController) }
+                composable("selection/{iconIndex}") { backStackEntry ->
+                    SelectionScreen(navController, backStackEntry.arguments?.getString("iconIndex")?.toInt() ?: 0)
+                }
+            }
         }
     }
 }
 
-@Preview(device = Devices.WEAR_OS_SMALL_ROUND, showSystemUi = true)
+//@Preview(device = Devices.WEAR_OS_SMALL_ROUND, showSystemUi = true)
 @Composable
-fun WearApp() {
+fun WearApp(navController: NavController) {
     val canvasWidth = LocalConfiguration.current.screenWidthDp.dp
     val canvasHeight = LocalConfiguration.current.screenHeightDp.dp
     val triangleRadius = minOf(canvasWidth, canvasHeight) * 0.35f // 35% of the canvas size
@@ -75,8 +90,8 @@ fun WearApp() {
                 val angleIncrement = 60.0
                 for (i in 0..5) {
                     val angle = Math.toRadians(angleIncrement * i)
-                    val endX = (canvasCenter.x + lineRadius * Math.cos(angle)).toFloat()
-                    val endY = (canvasCenter.y + lineRadius * Math.sin(angle)).toFloat()
+                    val endX = (canvasCenter.x + lineRadius * cos(angle)).toFloat()
+                    val endY = (canvasCenter.y + lineRadius * sin(angle)).toFloat()
                     drawLine(
                         color = Color.White,
                         start = canvasCenter,
@@ -90,6 +105,7 @@ fun WearApp() {
                 Box(
                     modifier = Modifier
                         .offset(x = position.second - canvasWidth / 2, y = position.first - canvasHeight / 2)
+                        .clickable { navController.navigate("selection/${index + 1}") }
                         .background(Color.Transparent)
                 ) {
                     Text(
@@ -101,6 +117,45 @@ fun WearApp() {
                 }
             }
 
+
+        }
+    }
+}
+
+@Composable
+fun SelectionScreen(navController: NavController, iconIndex: Int) {
+    // Handle the back button press
+    BackHandler {
+        navController.navigateUp() // Navigate back to the previous screen
+    }
+
+    MaterialTheme {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            // Create a column for the selection items
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("What do you want to add as an emojicon?", color = Color.White)
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = { /* TODO: Handle text selection */ }) {
+                    Text("Text")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = { /* TODO: Handle emoji selection */ }) {
+                    Text("Emoji")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = { /* TODO: Handle image selection */ }) {
+                    Text("Image")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = { navController.navigateUp() }) {
+                    Text("Cancel")
+                }
+            }
         }
     }
 }
