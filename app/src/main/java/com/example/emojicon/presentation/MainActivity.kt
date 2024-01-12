@@ -9,10 +9,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -129,6 +132,9 @@ fun SelectionScreen(navController: NavController, iconIndex: Int) {
         navController.navigateUp() // Navigate back to the previous screen
     }
 
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val maxWidth = screenWidth * 0.73f // Limit the width to 80% of the screen width
+
     MaterialTheme {
         Box(
             modifier = Modifier
@@ -136,26 +142,49 @@ fun SelectionScreen(navController: NavController, iconIndex: Int) {
                 .background(Color.Black),
             contentAlignment = Alignment.Center
         ) {
-            // Create a column for the selection items
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("What do you want to add as an emojicon?", color = Color.White)
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = { /* TODO: Handle text selection */ }) {
-                    Text("Text")
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .width(maxWidth)
+                    .padding(14.dp)
+            ) {
+                Text(
+                    "Which one do you want to add as an emoji?",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(bottom = 6.dp, start = 10.dp)
+                )
+                Row {
+                    SelectionItem(text = "Text", onClickFunction = { /* Handle Text Click */ })
+                    Spacer(modifier = Modifier.width(8.dp))
+                    SelectionItem(text = "Emoji", onClickFunction = { /* Handle Emoji Click */ })
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { /* TODO: Handle emoji selection */ }) {
-                    Text("Emoji")
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { /* TODO: Handle image selection */ }) {
-                    Text("Image")
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { navController.navigateUp() }) {
-                    Text("Cancel")
+                Spacer(modifier = Modifier.height(1.dp))
+                Row {
+                    SelectionItem(text = "Image", onClickFunction = { /* Handle Image Click */ })
+                    Spacer(modifier = Modifier.width(8.dp))
+                    SelectionItem(text = "Cancel", onClickFunction = { navController.navigateUp() })
                 }
             }
         }
     }
+}
+
+@Composable
+fun SelectionItem(text: String, onClickFunction: () -> Unit) {
+    Button(
+        onClick = onClickFunction,
+        modifier = Modifier
+            .padding(vertical = 6.dp),
+        // Button already provides a circular shape and clickable behavior
+    ) {
+        Text(
+            text = text,
+            color = Color.White,
+            fontSize = 14.sp
+        )
+    }
+    Spacer(modifier = Modifier.height(8.dp)) // Spacer for separating the items.
 }
