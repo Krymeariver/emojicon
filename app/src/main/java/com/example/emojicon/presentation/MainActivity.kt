@@ -1,29 +1,48 @@
 package com.example.emojicon.presentation
 
+import android.app.Application
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -31,6 +50,10 @@ import androidx.navigation.compose.rememberNavController
 import androidx.wear.compose.material.Button
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -38,20 +61,78 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            val viewModel: IconTextViewModel = viewModel()
             val navController = rememberNavController()
             NavHost(navController = navController, startDestination = "wearApp") {
-                composable("wearApp") { WearApp(navController) }
+                composable("wearApp") { WearApp(navController, viewModel) }
                 composable("selection/{iconIndex}") { backStackEntry ->
                     SelectionScreen(navController, backStackEntry.arguments?.getString("iconIndex")?.toInt() ?: 0)
+                }
+                composable("textInput/{iconIndex}") { backStackEntry ->
+                    val iconIndex = backStackEntry.arguments?.getString("iconIndex")?.toInt() ?: 0
+                    TextInputScreen(navController, viewModel, iconIndex)
+                }
+                composable("fullScreenDisplay/{content}") { backStackEntry ->
+                    val content = backStackEntry.arguments?.getString("content") ?: ""
+                    FullScreenDisplayScreen(content, navController)
                 }
             }
         }
     }
 }
 
+class IconTextViewModel(application: Application) : AndroidViewModel(application) {
+    private val context = getApplication<Application>();
+    private val _iconTexts = MutableStateFlow<Map<Int, String>>(loadSavedTexts())
+    val iconTexts: StateFlow<Map<Int, String>> = _iconTexts.asStateFlow()
+
+    private fun loadSavedTexts(): Map<Int, String> {
+        val sharedPrefs = context.getSharedPreferences("icon_texts", Context.MODE_PRIVATE)
+        val allEntries = sharedPrefs.all
+        val textsMap = mutableMapOf<Int, String>()
+
+        for ((key, value) in allEntries) {
+            if (value is String) {
+                textsMap[key.toInt()] = value
+            }
+        }
+
+        return textsMap
+    }
+
+
+    fun updateTextForIcon(iconIndex: Int, text: String) {
+        viewModelScope.launch {
+            val updatedMap = _iconTexts.value.toMutableMap().apply {
+                put(iconIndex, text)
+            }
+            _iconTexts.value = updatedMap
+            saveTexts(updatedMap)
+        }
+    }
+
+    private fun saveTexts(texts: Map<Int, String>) {
+        val sharedPrefs = context.getSharedPreferences("icon_texts", Context.MODE_PRIVATE)
+        with(sharedPrefs.edit()) {
+            // Clear previous data
+            clear()
+
+            // Convert the map to a set of strings
+            val textsSet = texts.entries.map { "${it.key}:${it.value}" }.toSet()
+
+            // Save the set
+            putStringSet("texts", textsSet)
+
+            apply()
+        }
+    }
+}
+
 //@Preview(device = Devices.WEAR_OS_SMALL_ROUND, showSystemUi = true)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun WearApp(navController: NavController) {
+fun WearApp(navController: NavController, viewModel: IconTextViewModel) {
+    val iconTexts by viewModel.iconTexts.collectAsState()
     val canvasWidth = LocalConfiguration.current.screenWidthDp.dp
     val canvasHeight = LocalConfiguration.current.screenHeightDp.dp
     val triangleRadius = minOf(canvasWidth, canvasHeight) * 0.35f // 35% of the canvas size
@@ -105,31 +186,78 @@ fun WearApp(navController: NavController) {
             }
 
             positions.forEachIndexed { index, position ->
+                val iconIndex = index + 1
+                val displayText =  iconTexts[iconIndex] ?: "+"
+                val fontSize = dynamicFontSize(displayText)
+                val numLines = numberOfLines(displayText)
+
                 Box(
                     modifier = Modifier
-                        .offset(x = position.second - canvasWidth / 2, y = position.first - canvasHeight / 2)
-                        .clickable { navController.navigate("selection/${index + 1}") }
+                        .offset(
+                            x = position.second - canvasWidth / 2,
+                            y = position.first - canvasHeight / 2
+                        )
+                        .combinedClickable(
+                            onClick = {
+                                if (displayText == "+") {
+                                    navController.navigate("selection/$iconIndex")
+                                } else {
+                                    navController.navigate("fullScreenDisplay/${displayText}")
+                                }
+                            },
+                            onLongClick = { navController.navigate("selection/$iconIndex") }
+                        )
                         .background(Color.Transparent)
-                ) {
+                )  {
                     Text(
-                        text = "+",
+                        text = displayText,
                         color = Color.White,
-                        fontSize = 30.sp,
-                        modifier = Modifier.align(Alignment.Center)
+                        fontSize = fontSize,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .widthIn(max = 55.dp), // Set a max width for text wrapping
+                        maxLines = numLines,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center // Center align the text
                     )
                 }
             }
-
-
         }
     }
 }
 
+fun dynamicFontSize(text: String): TextUnit {
+    return when {
+        text.length <= 5 -> 25.sp
+        text.length <= 10 -> 17.sp
+        text.length <= 20 -> 12.sp
+        text.length <= 30 -> 8.sp
+        else -> 5.sp
+    }
+}
+
+fun numberOfLines(text: String): Int {
+    return when {
+        text.length <= 8 -> 1
+        text.length <= 20 -> 2
+        else -> 3
+    }
+}
+
+@Composable
+fun FullScreenDisplayScreen(content: String, navController: NavController) {
+    BackHandler {
+        navController.navigate("WearApp"); // Navigate back to the previous screen
+    }
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+        Text(text = content, color = Color.White, fontSize = 30.sp, textAlign = TextAlign.Center)
+    }
+}
 @Composable
 fun SelectionScreen(navController: NavController, iconIndex: Int) {
     // Handle the back button press
     BackHandler {
-        navController.navigateUp() // Navigate back to the previous screen
+        navController.navigate("WearApp"); // Navigate back to the previous screen
     }
 
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
@@ -157,7 +285,7 @@ fun SelectionScreen(navController: NavController, iconIndex: Int) {
                         .padding(bottom = 6.dp, start = 10.dp)
                 )
                 Row {
-                    SelectionItem(text = "Text", onClickFunction = { /* Handle Text Click */ })
+                    SelectionItem(text = "Text", onClickFunction = { navController.navigate("textInput/$iconIndex") })
                     Spacer(modifier = Modifier.width(8.dp))
                     SelectionItem(text = "Emoji", onClickFunction = { /* Handle Emoji Click */ })
                 }
@@ -188,3 +316,54 @@ fun SelectionItem(text: String, onClickFunction: () -> Unit) {
     }
     Spacer(modifier = Modifier.height(8.dp)) // Spacer for separating the items.
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TextInputScreen(navController: NavController, viewModel: IconTextViewModel, iconIndex: Int) {
+    val textState = remember { mutableStateOf("") }
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val maxWidth = screenWidth * 0.7f // Limit the width to 70% of the screen width
+
+    // Handle the back button press
+    BackHandler {
+        navController.navigateUp() // Navigate back to the previous screen
+    }
+
+    MaterialTheme {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black), // Black background color for consistency
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .width(maxWidth) // Apply maxWidth
+                    .padding(top = 50.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                OutlinedTextField(
+                    value = textState.value,
+                    onValueChange = { textState.value = it },
+                    label = { Text("Enter Text", color = Color.White) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                        focusedBorderColor = Color.White,
+                        unfocusedBorderColor = Color.Gray,
+                        focusedTextColor = Color.White,
+                        cursorColor = Color.White,
+                        focusedPlaceholderColor = Color.Gray
+                    ),
+                    textStyle = TextStyle(color = Color.White)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = {  viewModel.updateTextForIcon(iconIndex, textState.value)
+                    navController.navigate("wearApp") }) {
+                    Text("Submit")
+                }
+            }
+        }
+    }
+}
+
+
