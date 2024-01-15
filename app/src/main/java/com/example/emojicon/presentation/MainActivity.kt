@@ -271,40 +271,65 @@ fun FullScreenDisplayScreen(content: String, navController: NavController) {
     val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     val gyroscopeSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
     val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-
-
-    BackHandler {
-        navController.navigate("WearApp"); // Navigate back to the previous screen
-    }
+    val accelerometerSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
     // Keep the screen on for 30 seconds when this screen is active
     val keepScreenOn = remember { mutableStateOf(true) }
-    // Create a handler to turn off the screen timeout after 30 seconds
-    val handler = remember { Handler() }
 
-    // Runnable to turn off the screen timeout
-    val turnOffTimeout = remember {
-        Runnable {
-            keepScreenOn.value = false
-            handler.removeCallbacksAndMessages(null)
+    // Define the rotation angles
+    var rotationZ by remember { mutableStateOf(0f) }
+
+    val accelerometerListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent?) {
+            if (event != null) {
+                val gravity = event.values
+                val x = gravity[0]
+                val y = gravity[1]
+                val z = gravity[2]
+
+                // Calculate the rotation angle based on accelerometer values
+                val angle = Math.toDegrees(Math.atan2(x.toDouble(), z.toDouble()))
+                rotationZ = angle.toFloat()
+
+                // Adjust the angle to the desired range (0 to 360 degrees)
+                if (rotationZ < 0) {
+                    rotationZ += 360f
+                }
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+            // Handle accuracy changes if needed
         }
     }
 
     // Start the screen timeout when the composable is first active
     DisposableEffect(Unit) {
+        val handler = Handler()
         keepScreenOn.value = true
-        handler.postDelayed(turnOffTimeout, 30000) // 30 seconds
+        handler.postDelayed({
+            keepScreenOn.value = false
+        }, 60000) // 30 seconds
+
+        sensorManager.registerListener(
+            accelerometerListener,
+            sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
+            SensorManager.SENSOR_DELAY_NORMAL
+        )
 
         onDispose {
             // Clean up when the composable is disposed
             handler.removeCallbacksAndMessages(null)
+            sensorManager.unregisterListener(accelerometerListener)
         }
     }
 
-
     // Check if the screen should stay on
     if (keepScreenOn.value) {
-        powerManager.newWakeLock(PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "MyApp:KeepScreenOn").apply {
+        powerManager.newWakeLock(
+            PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+            "MyApp:KeepScreenOn"
+        ).apply {
             acquire(30_000) // 30 seconds
         }
     }
@@ -316,38 +341,8 @@ fun FullScreenDisplayScreen(content: String, navController: NavController) {
         else -> 30.sp
     }
 
-    // Define the rotation angles
-    var rotationX by remember { mutableStateOf(0f) }
-    var rotationY by remember { mutableStateOf(0f) }
-    var rotationZ by remember { mutableStateOf(0f) }
-
-    // Create a SensorEventListener
-    val gyroscopeListener = object : SensorEventListener {
-        override fun onSensorChanged(event: SensorEvent?) {
-            if (event != null) {
-                rotationX = event.values[0]
-                rotationY = event.values[1]
-                rotationZ = event.values[2]
-            }
-        }
-
-        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-            // Handle accuracy changes if needed
-        }
-    }
-
-    // Register the listener when the composable is active
-    DisposableEffect(Unit) {
-        sensorManager.registerListener(
-            gyroscopeListener,
-            gyroscopeSensor,
-            SensorManager.SENSOR_DELAY_NORMAL
-        )
-
-        onDispose {
-            // Unregister the listener when the composable is disposed
-            sensorManager.unregisterListener(gyroscopeListener)
-        }
+    BackHandler {
+        navController.navigate("WearApp"); // Navigate back to the previous screen
     }
 
     // Apply rotation transformations to the Text composable
@@ -362,8 +357,6 @@ fun FullScreenDisplayScreen(content: String, navController: NavController) {
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .graphicsLayer(
-                    rotationX = rotationX,
-                    rotationY = rotationY,
                     rotationZ = rotationZ
                 )
         )
@@ -374,7 +367,6 @@ fun FullScreenDisplayScreen(content: String, navController: NavController) {
         navController.navigate("WearApp")
     }
 }
-
 
 @Composable
 fun SelectionScreen(navController: NavController, iconIndex: Int) {
