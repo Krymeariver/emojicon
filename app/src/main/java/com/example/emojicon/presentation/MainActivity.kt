@@ -2,7 +2,13 @@ package com.example.emojicon.presentation
 
 import android.app.Application
 import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.PowerManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -25,21 +31,26 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat.getSystemService
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -82,23 +93,33 @@ class MainActivity : ComponentActivity() {
 }
 
 class IconTextViewModel(application: Application) : AndroidViewModel(application) {
-    private val context = getApplication<Application>();
+    private val context = getApplication<Application>()
     private val _iconTexts = MutableStateFlow<Map<Int, String>>(loadSavedTexts())
     val iconTexts: StateFlow<Map<Int, String>> = _iconTexts.asStateFlow()
 
+    init {
+        // Call loadSavedTexts() during initialization to load saved data
+        _iconTexts.value = loadSavedTexts()
+    }
+
     private fun loadSavedTexts(): Map<Int, String> {
         val sharedPrefs = context.getSharedPreferences("icon_texts", Context.MODE_PRIVATE)
-        val allEntries = sharedPrefs.all
-        val textsMap = mutableMapOf<Int, String>()
+        val textsSet = sharedPrefs.getStringSet("texts", emptySet())
 
-        for ((key, value) in allEntries) {
-            if (value is String) {
-                textsMap[key.toInt()] = value
+        // Convert the set to a map
+        val textsMap = mutableMapOf<Int, String>()
+        textsSet?.forEach { textEntry ->
+            val parts = textEntry.split(":")
+            if (parts.size == 2) {
+                val key = parts[0].toInt()
+                val value = parts[1]
+                textsMap[key] = value
             }
         }
 
         return textsMap
     }
+
 
 
     fun updateTextForIcon(iconIndex: Int, text: String) {
@@ -228,7 +249,7 @@ fun WearApp(navController: NavController, viewModel: IconTextViewModel) {
 
 fun dynamicFontSize(text: String): TextUnit {
     return when {
-        text.length <= 5 -> 25.sp
+        text.length <= 5 -> 20.sp
         text.length <= 10 -> 17.sp
         text.length <= 20 -> 12.sp
         text.length <= 30 -> 8.sp
@@ -246,13 +267,115 @@ fun numberOfLines(text: String): Int {
 
 @Composable
 fun FullScreenDisplayScreen(content: String, navController: NavController) {
+    val context = LocalContext.current
+    val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    val gyroscopeSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+    val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+
+
     BackHandler {
         navController.navigate("WearApp"); // Navigate back to the previous screen
     }
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-        Text(text = content, color = Color.White, fontSize = 30.sp, textAlign = TextAlign.Center)
+
+    // Keep the screen on for 30 seconds when this screen is active
+    val keepScreenOn = remember { mutableStateOf(true) }
+    // Create a handler to turn off the screen timeout after 30 seconds
+    val handler = remember { Handler() }
+
+    // Runnable to turn off the screen timeout
+    val turnOffTimeout = remember {
+        Runnable {
+            keepScreenOn.value = false
+            handler.removeCallbacksAndMessages(null)
+        }
+    }
+
+    // Start the screen timeout when the composable is first active
+    DisposableEffect(Unit) {
+        keepScreenOn.value = true
+        handler.postDelayed(turnOffTimeout, 30000) // 30 seconds
+
+        onDispose {
+            // Clean up when the composable is disposed
+            handler.removeCallbacksAndMessages(null)
+        }
+    }
+
+
+    // Check if the screen should stay on
+    if (keepScreenOn.value) {
+        powerManager.newWakeLock(PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "MyApp:KeepScreenOn").apply {
+            acquire(30_000) // 30 seconds
+        }
+    }
+
+    val fontSize = when {
+        content.length <= 3 -> 90.sp
+        content.length <= 5 -> 70.sp
+        content.length <= 10 -> 40.sp
+        else -> 30.sp
+    }
+
+    // Define the rotation angles
+    var rotationX by remember { mutableStateOf(0f) }
+    var rotationY by remember { mutableStateOf(0f) }
+    var rotationZ by remember { mutableStateOf(0f) }
+
+    // Create a SensorEventListener
+    val gyroscopeListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent?) {
+            if (event != null) {
+                rotationX = event.values[0]
+                rotationY = event.values[1]
+                rotationZ = event.values[2]
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+            // Handle accuracy changes if needed
+        }
+    }
+
+    // Register the listener when the composable is active
+    DisposableEffect(Unit) {
+        sensorManager.registerListener(
+            gyroscopeListener,
+            gyroscopeSensor,
+            SensorManager.SENSOR_DELAY_NORMAL
+        )
+
+        onDispose {
+            // Unregister the listener when the composable is disposed
+            sensorManager.unregisterListener(gyroscopeListener)
+        }
+    }
+
+    // Apply rotation transformations to the Text composable
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Black),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = content,
+            color = Color.White,
+            fontSize = fontSize,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .graphicsLayer(
+                    rotationX = rotationX,
+                    rotationY = rotationY,
+                    rotationZ = rotationZ
+                )
+        )
+    }
+
+    // Handle back navigation
+    BackHandler {
+        navController.navigate("WearApp")
     }
 }
+
+
 @Composable
 fun SelectionScreen(navController: NavController, iconIndex: Int) {
     // Handle the back button press
@@ -359,7 +482,7 @@ fun TextInputScreen(navController: NavController, viewModel: IconTextViewModel, 
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(onClick = {  viewModel.updateTextForIcon(iconIndex, textState.value)
                     navController.navigate("wearApp") }) {
-                    Text("Submit")
+                    Text("Submit", color = Color.White)
                 }
             }
         }
